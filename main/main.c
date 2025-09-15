@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include "string.h"
 
 #define UART_NUM UART_NUM_2
 #define TX2 17
@@ -37,9 +38,27 @@ void app_main(void)
     while (1) {
         int len = uart_read_bytes(UART_NUM, data, sizeof(data) - 1, 100 / portTICK_PERIOD_MS);
         if (len > 0) {
-            data[len] = '\0';  // Null-terminate so printf works
-            printf("Received (%d bytes): %s\n", len, data);
+            data[len] = '\0';  // null terminate
+
+            // find $GPGGA in buffer
+            char *start = strstr((char*)data, "$GPGGA");
+            if (start) {
+                char *end = strstr(start, "\n");  // end of line
+                if (end) {
+                    size_t sub_len = end - start;
+                    if (sub_len < sizeof(data)) {
+                        char gpgga[100];
+                        if (sub_len >= sizeof(gpgga)) {
+                            sub_len = sizeof(gpgga) - 1;  // clamp length
+                        }
+                        strncpy(gpgga, start, sub_len);
+                        gpgga[sub_len] = '\0';  // null terminate
+
+                        printf("%s\n", gpgga);
+                    }
+                }
+            }
         }
-        vTaskDelay(10 / portTICK_PERIOD_MS); // Small delay to yield
+        vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
