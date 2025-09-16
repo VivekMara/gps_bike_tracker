@@ -11,8 +11,7 @@
 #define RX2 16
 #define BUF_SIZE (1024)
 
-void app_main(void)
-{
+void uart_init(void){
     // setup UART buffered IO with event queue
     QueueHandle_t uart_queue;
     ESP_ERROR_CHECK(uart_driver_install(UART_NUM, BUF_SIZE * 2, BUF_SIZE * 2, 10, &uart_queue, 0));
@@ -30,35 +29,51 @@ void app_main(void)
 
     // set UART pins (TX: IO17, RX: IO16, no RTS/CTS)
     ESP_ERROR_CHECK(uart_set_pin(UART_NUM, TX2, RX2, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+}
 
-    // buffer for incoming data
-    uint8_t data[128];
-
-    // continuous read loop
-    while (1) {
-        int len = uart_read_bytes(UART_NUM, data, sizeof(data) - 1, 100 / portTICK_PERIOD_MS);
-        if (len > 0) {
-            data[len] = '\0';  // null terminate
-
-            // find $GPGGA in buffer
-            char *start = strstr((char*)data, "$GPGGA");
-            if (start) {
-                char *end = strstr(start, "\n");  // end of line
-                if (end) {
-                    size_t sub_len = end - start;
-                    if (sub_len < sizeof(data)) {
-                        char gpgga[100];
-                        if (sub_len >= sizeof(gpgga)) {
-                            sub_len = sizeof(gpgga) - 1;  // clamp length
-                        }
-                        strncpy(gpgga, start, sub_len);
-                        gpgga[sub_len] = '\0';  // null terminate
-
-                        printf("%s\n", gpgga);
-                    }
-                }
-            }
+char* parse_data(char *s){
+    char *req_str = "$GPGGA";
+    char* start = strstr(s, req_str);
+    if (start){
+        int len = 1;
+        char *c = start + 1;
+        while (*c && *c != '$'){
+            len++;
+            c++;
         }
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        char *parsed = malloc(len + 1);
+        if (!parsed) return NULL;
+        strncpy(parsed, start, len + 1);
+        parsed[len] = '\0';
+        return parsed;
     }
+    return NULL;
+}
+
+void read_data(void*){
+    uint8_t data[128];
+    while(1){
+        int length = 0;
+        ESP_ERROR_CHECK(uart_get_buffered_data_len(UART_NUM, (size_t*)&length));
+        length = uart_read_bytes(UART_NUM, data, length, 100);
+        if (length > 0){
+            char *c = parse_data((char *)data);
+            data[length] = '\0';
+            if (c != NULL){
+                printf("%s\n", c);
+                free(c);
+            }
+            // printf("%s\n", (char *)data);
+        }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+    }
+}
+
+void app_main(void)
+{
+    // initialize uart
+    uart_init();
+
+    // RTOS task to read data from the sensor
+    xTaskCreate(read_data, "Read data from sensor", 4096, NULL, 1, NULL);
 }
